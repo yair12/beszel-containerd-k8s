@@ -37,6 +37,7 @@ type Agent struct {
 	netIoStats                map[uint16]system.NetIoStats                          // Keeps track of bandwidth usage per cache interval
 	netInterfaceDeltaTrackers map[uint16]*deltatracker.DeltaTracker[string, uint64] // Per-cache-time NIC delta trackers
 	dockerManager             *dockerManager                                        // Manages Docker API requests
+	containerdK8sManager      *ContainerdK8SManager                                 // Manages containerd API requests
 	sensorConfig              *SensorConfig                                         // Sensors config
 	systemInfo                system.Info                                           // Host system info (dynamic)
 	systemDetails             system.Details                                        // Host system details (static, once-per-connection)
@@ -108,6 +109,12 @@ func NewAgent(dataDir ...string) (agent *Agent, err error) {
 
 	// initialize docker manager
 	agent.dockerManager = newDockerManager(agent)
+
+	// initialize containerd k8s manager
+	agent.containerdK8sManager, err = NewContainerdCollector()
+	if err != nil {
+		slog.Warn("Containerd", "err", err)
+	}
 
 	// initialize system info
 	agent.refreshSystemDetails()
@@ -209,6 +216,12 @@ func (a *Agent) gatherStats(options common.DataRequestOptions) *system.CombinedD
 	if a.monitorManager != nil {
 		data.Monitors = a.monitorManager.GetResults(cacheTimeMs)
 		slog.Debug("Monitors", "data", data.Monitors)
+	}
+	if a.containerdK8sManager != nil {
+		if containerStats := a.containerdK8sManager.PollContainers(); len(containerStats) > 0 {
+			data.Containers = append(data.Containers, containerStats...)
+			slog.Debug("Containerd K8s", "data", containerStats)
+		}
 	}
 
 	// skip updating systemd services if cache time is not the default 60sec interval
